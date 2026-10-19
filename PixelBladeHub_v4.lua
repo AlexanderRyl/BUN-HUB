@@ -459,8 +459,25 @@ end
 ------------------------------------------------------------------------
 -- GAME MODULES  (safe require + enum resolution)
 ------------------------------------------------------------------------
+-- Roblox THROWS when you index an Instance with a dotted path that does not
+-- resolve ("X is not a valid member of Y"), it does not return nil. So walk
+-- the path with FindFirstChild instead of indexing, and only then require.
+local function ResolveModule(path)
+    local node = RS
+    for segment in string.gmatch(path, "[^%.]+") do
+        if typeof(node) ~= "Instance" then return nil end
+        local ok, child = pcall(function() return node:FindFirstChild(segment) end)
+        if not ok or child == nil then return nil end
+        node = child
+    end
+    if typeof(node) ~= "Instance" then return nil end
+    return node
+end
+
 local function SafeRequire(path)
-    local ok, mod = pcall(require, RS[path])
+    local target = ResolveModule(path)
+    if not target then return nil end
+    local ok, mod = pcall(require, target)
     if ok and type(mod) == "table" then return mod end
     return nil
 end
@@ -1434,7 +1451,9 @@ do
         if Config.Fullbright or Config.NoFog then
             if not LightOrig then
                 LightOrig = {}
-                for _, k in ipairs(LIGHT_PROPS) do LightOrig[k] = Lighting[k] end
+                for _, k in ipairs(LIGHT_PROPS) do
+                    pcall(function() LightOrig[k] = Lighting[k] end)
+                end
             end
             if Config.Fullbright then
                 Lighting.Brightness = 2
