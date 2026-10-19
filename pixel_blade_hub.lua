@@ -1814,7 +1814,154 @@ do
     end))
 end
 
--- Sidebar / content
+------------------------------------------------------------------------
+-- FLOATING TOGGLE BUTTON
+-- Always visible, draggable anywhere, click/tap to open or close the menu
+-- so you never have to remember the hotkey (especially on mobile).
+------------------------------------------------------------------------
+do
+    local BTN_SIZE = 48
+
+    local ToggleBtn = Make("TextButton", {
+        Name = "PBH_Toggle", AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.new(1, -44, 0.5, -20),
+        Size = UDim2.fromOffset(BTN_SIZE, BTN_SIZE),
+        BackgroundColor3 = Accent(), BorderSizePixel = 0,
+        Text = "PB", Font = Enum.Font.GothamBold, TextSize = 16,
+        TextColor3 = Color3.new(1, 1, 1), AutoButtonColor = false,
+        Active = true, ZIndex = 30,
+    }, ScreenGui)
+    Round(ToggleBtn, BTN_SIZE / 2)
+    Bind(ToggleBtn, "BackgroundColor3")
+    Make("UIStroke", {
+        Color = Color3.new(1, 1, 1), Thickness = 2, Transparency = 0.15,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+    }, ToggleBtn)
+
+    -- Soft drop shadow so it reads against any background (no asset needed).
+    local Shadow = Make("Frame", {
+        Name = "Shadow", AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.new(1, -41, 0.5, -17),
+        Size = UDim2.fromOffset(BTN_SIZE + 8, BTN_SIZE + 8),
+        BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 0.45,
+        BorderSizePixel = 0, ZIndex = 29, Active = false,
+    }, ScreenGui)
+    Round(Shadow, (BTN_SIZE + 8) / 2)
+
+    -- Visual state: dim when the menu is open, bright when it is closed.
+    local function RenderButton()
+        if MenuOpen then
+            ToggleBtn.BackgroundTransparency = 0.15
+            Shadow.BackgroundTransparency = 0.8
+        else
+            ToggleBtn.BackgroundTransparency = 0
+            Shadow.BackgroundTransparency = 0.45
+        end
+    end
+    AccentCallbacks[#AccentCallbacks + 1] = RenderButton
+
+    local origSetMenu = SetMenu
+    SetMenu = function(open)
+        origSetMenu(open)
+        RenderButton()
+        -- Little pop so the click feels responsive.
+        if ToggleBtn then
+            Tween(ToggleBtn, 0.1, { Size = UDim2.fromOffset(BTN_SIZE * 0.85, BTN_SIZE * 0.85) })
+            Tween(Shadow, 0.1, { Size = UDim2.fromOffset((BTN_SIZE + 8) * 0.85, (BTN_SIZE + 8) * 0.85) })
+            task.delay(0.11, function()
+                if ToggleBtn and ToggleBtn.Parent then
+                    ToggleBtn.Size = UDim2.fromOffset(BTN_SIZE, BTN_SIZE)
+                    Shadow.Size = UDim2.fromOffset(BTN_SIZE + 8, BTN_SIZE + 8)
+                end
+            end)
+        end
+    end
+
+    -- Drag with tap detection: a click that barely moves counts as a tap.
+    do
+        local dragging, moved = false, false
+        local dragStart, startPos, offset
+
+        ToggleBtn.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1
+                or input.UserInputType == Enum.UserInputType.Touch then
+                dragging, moved = true, false
+                dragStart = input.Position
+                startPos = ToggleBtn.Position
+                offset = Vector2.new(0, 0)
+                -- Work in absolute pixels once dragging starts.
+                local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize
+                    or Vector2.new(1280, 720)
+                offset = Vector2.new(
+                    startPos.X.Scale * vp.X + startPos.X.Offset - input.Position.X,
+                    startPos.Y.Scale * vp.Y + startPos.Y.Offset - input.Position.Y)
+                input.Changed:Connect(function()
+                    if input.UserInputState == Enum.UserInputState.End then
+                        if dragging and not moved then SetMenu(not MenuOpen) end
+                        dragging = false
+                    end
+                end)
+            end
+        end)
+
+        Track(UserInputService.InputChanged:Connect(function(input)
+            if not dragging then return end
+            if input.UserInputType == Enum.UserInputType.MouseMovement
+                or input.UserInputType == Enum.UserInputType.Touch then
+                local d = input.Position - dragStart
+                if d.Magnitude > 6 then moved = true end
+                if not moved then return end
+                local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize
+                    or Vector2.new(1280, 720)
+                local half = BTN_SIZE / 2
+                -- Clamp inside the screen so it can never be lost off-screen.
+                local x = math.clamp(input.Position.X + offset.X, half + 4, vp.X - half - 4)
+                local y = math.clamp(input.Position.Y + offset.Y, half + 4, vp.Y - half - 4)
+                local px = UDim2.fromOffset(x, y)
+                ToggleBtn.Position = px
+                Shadow.Position = px
+            end
+        end))
+    end
+
+    -- Gentle attention pulse until the user has opened the menu once.
+    do
+        local pulse = 0
+        Every("BtnPulse", 1.6, function()
+            if MenuOpen or not ToggleBtn.Parent then return end
+            pulse = pulse + 1
+            local grow = (pulse % 2 == 1) and 1.14 or 1.0
+            ToggleBtn.Size = UDim2.fromOffset(BTN_SIZE * grow, BTN_SIZE * grow)
+            Shadow.Size = UDim2.fromOffset((BTN_SIZE + 8) * grow, (BTN_SIZE + 8) * grow)
+        end, function() return not MenuOpen end)
+    end
+
+    -- Keep it glued to the right edge if the window is resized.
+    if workspace.CurrentCamera then
+        Track(workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(function()
+            if not ToggleBtn.Parent then return end
+            local vp = workspace.CurrentCamera.ViewportSize
+            local x = ToggleBtn.Position.X.Offset
+            if ToggleBtn.Position.X.Scale >= 0.9 then
+                ToggleBtn.Position = UDim2.new(1, -44, ToggleBtn.Position.Y.Scale,
+                                              ToggleBtn.Position.Y.Offset)
+                Shadow.Position = ToggleBtn.Position
+            elseif x > vp.X - 20 or x < 0 then
+                ToggleBtn.Position = UDim2.fromOffset(
+                    math.clamp(x, BTN_SIZE / 2 + 4, vp.X - BTN_SIZE / 2 - 4),
+                    ToggleBtn.Position.Y.Offset)
+                Shadow.Position = ToggleBtn.Position
+            end
+        end))
+    end
+
+    Track(function()
+        if ToggleBtn then pcall(function() ToggleBtn:Destroy() end) end
+        if Shadow then pcall(function() Shadow:Destroy() end) end
+    end)
+
+    RenderButton()
+end
 local Sidebar = Make("Frame", {
     Size = UDim2.new(0, 142, 1, -46), Position = UDim2.new(0, 0, 0, 46),
     BackgroundColor3 = Theme.Sidebar, BorderSizePixel = 0,
