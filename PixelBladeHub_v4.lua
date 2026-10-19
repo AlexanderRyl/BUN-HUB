@@ -421,13 +421,23 @@ end))
 ------------------------------------------------------------------------
 -- REMOTES  (cached, missing remotes retried every 5s)
 ------------------------------------------------------------------------
-local NetworkRemotes = RS:FindFirstChild("_network_remotes") or RS:WaitForChild("_network_remotes", 15)
+local NetworkRemotes = RS:FindFirstChild("_network_remotes")
+if not NetworkRemotes then
+    task.spawn(function()
+        pcall(function()
+            NetworkRemotes = RS:WaitForChild("_network_remotes", 5)
+        end)
+    end)
+end
 local RemoteCache, RemoteMiss = {}, {}
 
 local function GetRemote(name)
     local r = RemoteCache[name]
     if r and r.Parent then return r end
-    if not NetworkRemotes or not NetworkRemotes.Parent then return nil end
+    if not NetworkRemotes or not NetworkRemotes.Parent then
+        NetworkRemotes = RS:FindFirstChild("_network_remotes")
+        if not NetworkRemotes then return nil end
+    end
     local miss = RemoteMiss[name]
     if miss and os.clock() - miss < 5 then return nil end
     r = NetworkRemotes:FindFirstChild(name)
@@ -476,7 +486,7 @@ end
 
 local function SafeRequire(path)
     local target = ResolveModule(path)
-    if not target then return nil end
+    if not target or not target:IsA("ModuleScript") then return nil end
     local ok, mod = pcall(require, target)
     if ok and type(mod) == "table" then return mod end
     return nil
@@ -577,7 +587,7 @@ do
     if type(gethui) == "function" then
         local ok, h = pcall(gethui)
         if ok and h then
-            ScreenGui.Parent = h
+            pcall(function() ScreenGui.Parent = h end)
             parented = ScreenGui.Parent ~= nil
         end
     end
@@ -585,7 +595,9 @@ do
         pcall(function() ScreenGui.Parent = CoreGui end)
         parented = ScreenGui.Parent ~= nil
     end
-    if not parented then ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
+    if not parented then
+        pcall(function() ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui", 5) end)
+    end
 end
 Track(ScreenGui)
 
@@ -1769,11 +1781,22 @@ local function SetMenu(open)
     MenuOpen = open
     if open then
         Window.Visible = true
-        Window.GroupTransparency = 1
-        Tween(Window, 0.15, { GroupTransparency = 0 })
+        if Window:IsA("CanvasGroup") then
+            Window.GroupTransparency = 1
+            Tween(Window, 0.15, { GroupTransparency = 0 })
+            task.delay(0.16, function()
+                if MenuOpen and Window:IsA("CanvasGroup") then
+                    Window.GroupTransparency = 0
+                end
+            end)
+        end
     else
-        Tween(Window, 0.12, { GroupTransparency = 1 })
-        task.delay(0.13, function() if not MenuOpen then Window.Visible = false end end)
+        if Window:IsA("CanvasGroup") then
+            Tween(Window, 0.12, { GroupTransparency = 1 })
+            task.delay(0.13, function() if not MenuOpen then Window.Visible = false end end)
+        else
+            Window.Visible = false
+        end
     end
 end
 
@@ -1900,6 +1923,10 @@ do
     do
         local dragging, moved = false, false
         local dragStart, startPos, offset
+
+        ToggleBtn.MouseButton1Click:Connect(function()
+            SetMenu(not MenuOpen)
+        end)
 
         ToggleBtn.InputBegan:Connect(function(input)
             if input.UserInputType == Enum.UserInputType.MouseButton1
@@ -2367,9 +2394,12 @@ end
 do
     Track(UserInputService.InputBegan:Connect(function(input, gpe)
         if gpe then return end
+        local kc = input.KeyCode
         local want = Config.MenuKey
         local mapped = (Enum.KeyCode[want] or Enum.KeyCode.RightShift).Name
-        if input.KeyCode.Name == mapped then SetMenu(not MenuOpen) end
+        if kc.Name == mapped or kc == Enum.KeyCode.RightShift or kc == Enum.KeyCode.Insert then
+            SetMenu(not MenuOpen)
+        end
     end))
 end
 
@@ -2689,10 +2719,12 @@ end
 -- BOOT
 ------------------------------------------------------------------------
 LoadConfig()
+ApplyAccent()
 SelectTab("Combat")
-SetMenu(MenuOpen)
+SetMenu(true)
 
-Track(function() ApplyAccent() end)
+UI.Notify("Pixel Blade Hub v" .. VERSION, "Loaded! Press " .. Config.MenuKey .. " or tap PB to toggle.", 4)
+print("⚔️ Pixel Blade Hub v" .. VERSION .. " loaded successfully.")
 
 -- Ambient diagnostics
 task.spawn(function()
